@@ -9,9 +9,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
-
 	fyne2 "fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
@@ -19,62 +16,21 @@ import (
 )
 
 var (
-	peers     = make(map[net.Conn]string)
-	peersMu   sync.Mutex
-	peersList []string
-	nickname  = ""
-	chatView  *tview.TextView
-	peersView *tview.TextView
+	peers      = make(map[net.Conn]string)
+	peersMu    sync.Mutex
+	peersList  []string
+	nickname   = ""
+	messageLog = widget.NewMultiLineEntry()
 )
 
 func main() {
-
-	app := tview.NewApplication()
-	chatView = tview.NewTextView()
-	chatView.SetBorder(true)
-	chatView.SetDynamicColors(true)
-	chatView.SetTitle("Chat")
-	chatView.SetChangedFunc(func() {
-		app.Draw()
-	})
-
-	input := tview.NewInputField()
-	input.SetLabel("> ")
-	input.SetDoneFunc(func(key tcell.Key) {
-		if key == tcell.KeyEnter {
-			text := input.GetText()
-			if strings.TrimSpace(text) != "" {
-				broadcast(text)
-				fmt.Fprintf(chatView, "[ You ]: %s\n", text)
-			}
-			input.SetText("")
-		}
-	})
-
-	peersView = tview.NewTextView()
-	peersView.SetBorder(true)
-	peersView.SetDynamicColors(true)
-	peersView.SetTitle("Peers")
-	peersView.SetChangedFunc(func() {
-		app.Draw()
-	})
-	part1 := tview.NewFlex().
-		SetDirection(tview.FlexColumn).
-		AddItem(chatView, 0, 5, false).
-		AddItem(peersView, 0, 1, true)
-
-	layout := tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(part1, 0, 1, false).
-		AddItem(input, 3, 0, true)
-
 	if len(os.Args) < 4 {
-		chatView.Write([]byte("Using: go run main.go <port> <peer_ip:port> <nickname>"))
+		messageLog.SetText(messageLog.Text + "Using: go run main.go <port> <peer_ip:port> <nickname>")
 		os.Exit(1)
 	}
 	nickname = os.Args[3]
 	port := os.Args[1]
-	chatView.Write([]byte(fmt.Sprintf("Starting peer at: %s\n", port)))
+	messageLog.SetText(messageLog.Text + fmt.Sprintf("Starting peer at: %s\n", port))
 	go listen(port)
 
 	if len(os.Args) >= 3 {
@@ -84,9 +40,6 @@ func main() {
 		}
 
 	}
-	if err := app.SetRoot(layout, true).Run(); err != nil {
-		panic(err)
-	}
 	go ui()
 }
 
@@ -95,7 +48,7 @@ func listen(port string) {
 	if err != nil {
 		log.Fatal("Failed to start listening: ", err)
 	}
-	chatView.Write([]byte(fmt.Sprintf("Listening at %s\n", port)))
+	messageLog.SetText(messageLog.Text + fmt.Sprintf("Listening at %s\n", port))
 
 	for {
 		conn, err := ln.Accept()
@@ -104,7 +57,7 @@ func listen(port string) {
 			continue
 		}
 
-		chatView.Write([]byte(fmt.Sprintf("New connection: %v\n", conn.RemoteAddr())))
+		messageLog.SetText(messageLog.Text + fmt.Sprintf("New connection: %v\n", conn.RemoteAddr()))
 		fmt.Fprintf(conn, "%s", "NICKNAME|"+nickname+"\n")
 		go handleConn(conn)
 
@@ -125,7 +78,6 @@ func addPeer(conn net.Conn, peerName string) {
 	peersMu.Lock()
 	peers[conn] = peerName
 	peersList = append(peersList, peerName)
-	updatePeerList()
 	peersMu.Unlock()
 }
 
@@ -145,11 +97,11 @@ func handleConn(conn net.Conn) {
 		if strings.HasPrefix(msg, "NICKNAME|") {
 			peerName = strings.TrimPrefix(msg, "NICKNAME|")
 			addPeer(conn, peerName)
-			chatView.Write([]byte(fmt.Sprintf("[ %s connected]\n", peerName)))
+			messageLog.SetText(messageLog.Text + fmt.Sprintf("[ %s connected]\n", peerName))
 			continue
 
 		} else {
-			chatView.Write([]byte(fmt.Sprintf("[ %s ]: %s\n", peerName, msg)))
+			messageLog.SetText(messageLog.Text + fmt.Sprintf("[ %s ]: %s\n", peerName, msg))
 		}
 
 	}
@@ -173,15 +125,10 @@ func broadcast(msg string) {
 	}
 }
 
-func updatePeerList() {
-	peersView.SetText(strings.Join(peersList, "\n"))
-}
-
 func ui() {
 	myApp := app.New()
 	myWindow := myApp.NewWindow("P2P chat")
 
-	messageLog := widget.NewMultiLineEntry()
 	messageLog.SetPlaceHolder("Chat will appears here..")
 	messageLog.Disable()
 
