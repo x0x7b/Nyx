@@ -24,6 +24,30 @@ var (
 )
 
 func main() {
+	myApp := app.New()
+	myWindow := myApp.NewWindow("P2P chat")
+
+	messageLog.SetPlaceHolder("Chat will appears here..")
+	messageLog.Disable()
+
+	input := widget.NewEntry()
+	input.SetPlaceHolder("enter message..")
+
+	sendButton := widget.NewButton("send", func() {
+		text := input.Text
+		if strings.TrimSpace(text) != "" {
+			broadcast(text)
+			messageLog.SetText(messageLog.Text + "\n[You]: " + text + "\n")
+			input.SetText("")
+		}
+	})
+
+	inputArea := container.NewBorder(nil, nil, nil, sendButton, input)
+	content := container.NewBorder(nil, inputArea, nil, nil, messageLog)
+
+	myWindow.Resize(fyne2.NewSize(500, 400))
+	myWindow.SetContent(content)
+
 	if len(os.Args) < 4 {
 		messageLog.SetText(messageLog.Text + "Using: go run main.go <port> <peer_ip:port> <nickname>")
 		os.Exit(1)
@@ -40,7 +64,9 @@ func main() {
 		}
 
 	}
-	go ui()
+
+	myWindow.ShowAndRun()
+
 }
 
 func listen(port string) {
@@ -123,31 +149,4 @@ func broadcast(msg string) {
 		}
 
 	}
-}
-
-func ui() {
-	myApp := app.New()
-	myWindow := myApp.NewWindow("P2P chat")
-
-	messageLog.SetPlaceHolder("Chat will appears here..")
-	messageLog.Disable()
-
-	input := widget.NewEntry()
-	input.SetPlaceHolder("enter message..")
-
-	sendButton := widget.NewButton("send", func() {
-		text := input.Text
-		if strings.TrimSpace(text) != "" {
-			broadcast(text)
-			messageLog.SetText(messageLog.Text + "\n[You]: " + text)
-			input.SetText("")
-		}
-	})
-
-	inputArea := container.NewBorder(nil, nil, nil, sendButton, input)
-	content := container.NewBorder(nil, inputArea, nil, nil, messageLog)
-
-	myWindow.Resize(fyne2.NewSize(500, 400))
-	myWindow.SetContent(content)
-	myWindow.ShowAndRun()
 }
