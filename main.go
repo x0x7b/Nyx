@@ -12,6 +12,7 @@ import (
 	fyne2 "fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -21,14 +22,30 @@ var (
 	peersList  []string
 	nickname   = ""
 	messageLog = widget.NewMultiLineEntry()
+	logChannel = make(chan string, 100)
+	myApp      = app.New()
+	myWindow   = myApp.NewWindow("P2P chat")
+	radioGroup *widget.RadioGroup
 )
 
 func main() {
-	myApp := app.New()
-	myWindow := myApp.NewWindow("P2P chat")
-
+	peersList = []string{"All"}
+	radioGroup = widget.NewRadioGroup(peersList, func(selected string) {
+		logChannel <- fmt.Sprintf("[!] target set to %s\n", selected)
+	})
+	radioGroup.Horizontal = false
+	radioGroup.Selected = "All"
 	messageLog.SetPlaceHolder("Chat will appears here..")
 	messageLog.Disable()
+
+	peersView := widget.NewMultiLineEntry()
+	peersView.Disable()
+
+	go func() {
+		for msg := range logChannel {
+			messageLog.SetText(messageLog.Text + msg)
+		}
+	}()
 
 	input := widget.NewEntry()
 	input.SetPlaceHolder("enter message..")
@@ -36,25 +53,35 @@ func main() {
 	sendButton := widget.NewButton("send", func() {
 		text := input.Text
 		if strings.TrimSpace(text) != "" {
-			broadcast(text)
-			messageLog.SetText(messageLog.Text + "\n[You]: " + text + "\n")
+			selected := radioGroup.Selected
+			if selected == "All" {
+				broadcast(text)
+				logChannel <- fmt.Sprintf("[You > All]: " + text + "\n")
+			} else {
+				sendToPeer(selected, text)
+				logChannel <- fmt.Sprintf("[You > %s]: %s\n", selected, text)
+			}
+			logChannel <- fmt.Sprintf("[You]: " + text + "\n")
 			input.SetText("")
 		}
 	})
-
+	rightSide := container.NewVBox(
+		widget.NewLabel("send to:"),
+		radioGroup,
+	)
 	inputArea := container.NewBorder(nil, nil, nil, sendButton, input)
-	content := container.NewBorder(nil, inputArea, nil, nil, messageLog)
+	content := container.NewBorder(nil, inputArea, nil, rightSide, messageLog)
 
 	myWindow.Resize(fyne2.NewSize(500, 400))
 	myWindow.SetContent(content)
 
 	if len(os.Args) < 4 {
-		messageLog.SetText(messageLog.Text + "Using: go run main.go <port> <peer_ip:port> <nickname>")
+		logChannel <- "Using: go run main.go <port> <peer_ip:port> <nickname>\n"
 		os.Exit(1)
 	}
 	nickname = os.Args[3]
 	port := os.Args[1]
-	messageLog.SetText(messageLog.Text + fmt.Sprintf("Starting peer at: %s\n", port))
+	logChannel <- fmt.Sprintf("Starting peer at: %s\n", port)
 	go listen(port)
 
 	if len(os.Args) >= 3 {
@@ -72,18 +99,19 @@ func main() {
 func listen(port string) {
 	ln, err := net.Listen("tcp", ":"+port)
 	if err != nil {
-		log.Fatal("Failed to start listening: ", err)
+		dialog.ShowInformation("Error!", fmt.Sprintf("Failed to start listening: %v", err), myWindow)
+		return
 	}
-	messageLog.SetText(messageLog.Text + fmt.Sprintf("Listening at %s\n", port))
+	logChannel <- fmt.Sprintf("Listening at %s\n", port)
 
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			log.Fatal("Failed to accept: ", err)
+			dialog.ShowInformation("Error!", fmt.Sprintf("Failed to accept: %v", err), myWindow)
 			continue
 		}
 
-		messageLog.SetText(messageLog.Text + fmt.Sprintf("New connection: %v\n", conn.RemoteAddr()))
+		logChannel <- fmt.Sprintf("New connection: %v\n", conn.RemoteAddr())
 		fmt.Fprintf(conn, "%s", "NICKNAME|"+nickname+"\n")
 		go handleConn(conn)
 
@@ -93,7 +121,8 @@ func listen(port string) {
 func connectToPeer(addr string) {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
-		log.Fatal("Failed to connect", addr, err)
+		dialog.ShowInformation("Error!", fmt.Sprintf("Failed to connect to %v: %v", addr, err), myWindow)
+		return
 	}
 	fmt.Fprintf(conn, "%s", "NICKNAME|"+nickname+"\n")
 	go handleConn(conn)
@@ -103,8 +132,8 @@ func connectToPeer(addr string) {
 func addPeer(conn net.Conn, peerName string) {
 	peersMu.Lock()
 	peers[conn] = peerName
-	peersList = append(peersList, peerName)
 	peersMu.Unlock()
+	updateRadioUI()
 }
 
 func removePeer(conn net.Conn) {
@@ -113,6 +142,7 @@ func removePeer(conn net.Conn) {
 	peersMu.Unlock()
 	conn.Close()
 	fmt.Printf("Peer disconected: %v\n", conn.RemoteAddr())
+	updateRadioUI()
 }
 
 func handleConn(conn net.Conn) {
@@ -123,11 +153,11 @@ func handleConn(conn net.Conn) {
 		if strings.HasPrefix(msg, "NICKNAME|") {
 			peerName = strings.TrimPrefix(msg, "NICKNAME|")
 			addPeer(conn, peerName)
-			messageLog.SetText(messageLog.Text + fmt.Sprintf("[ %s connected]\n", peerName))
+			logChannel <- fmt.Sprintf("[ %s connected]\n", peerName)
 			continue
 
 		} else {
-			messageLog.SetText(messageLog.Text + fmt.Sprintf("[ %s ]: %s\n", peerName, msg))
+			logChannel <- fmt.Sprintf("[ %s ]: %s\n", peerName, msg)
 		}
 
 	}
@@ -148,5 +178,32 @@ func broadcast(msg string) {
 			delete(peers, conn)
 		}
 
+	}
+}
+
+func updateRadioUI() {
+	peersMu.Lock()
+	defer peersMu.Unlock()
+	names := []string{"All"}
+	for _, name := range peers {
+		names = append(names, name)
+	}
+	radioGroup.Options = names
+	radioGroup.Refresh()
+
+}
+
+func sendToPeer(peer string, text string) {
+	peersMu.Lock()
+	defer peersMu.Unlock()
+	for conn, name := range peers {
+		if name == peer {
+			_, err := fmt.Fprintln(conn, text)
+			if err != nil {
+				log.Println("Error sending: ", err)
+				conn.Close()
+				delete(peers, conn)
+			}
+		}
 	}
 }
