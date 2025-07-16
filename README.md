@@ -72,8 +72,3 @@ go get fyne.io/fyne/v2
 
 ---
 
-> *“Simplicity is the ultimate sophistication.”* — Leonardo da Vinci
-
----
-
-Happy chatting! 💬
