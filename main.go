@@ -14,6 +14,10 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
+
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/theme"
+	"image/color"
 )
 
 var (
@@ -28,7 +32,26 @@ var (
 	radioGroup *widget.RadioGroup
 )
 
+type customTheme struct {
+	fyne.Theme
+}
+
+func (c *customTheme) Color(name fyne.ThemeColorName, variant fyne.ThemeVariant) color.Color {
+	switch name {
+	case theme.ColorNameForeground: // текст
+		return color.RGBA{255, 255, 255, 255} // білий
+	case theme.ColorNameBackground: // фон Entry
+		return color.RGBA{30, 30, 30, 255} // темно-сірий
+	case theme.ColorNamePlaceHolder: // колір плейсхолдера
+		return color.RGBA{150, 150, 150, 255} // світло-сірий
+	default:
+		return c.Theme.Color(name, variant)
+	}
+}
+
 func main() {
+	myApp.Settings().SetTheme(&customTheme{Theme: theme.DarkTheme()})
+
 	peersList = []string{"All"}
 	radioGroup = widget.NewRadioGroup(peersList, func(selected string) {
 		logChannel <- fmt.Sprintf("[!] target set to %s\n", selected)
@@ -36,7 +59,6 @@ func main() {
 	radioGroup.Horizontal = false
 	radioGroup.Selected = "All"
 	messageLog.SetPlaceHolder("Chat will appears here..")
-	messageLog.Disable()
 
 	peersView := widget.NewMultiLineEntry()
 	peersView.Disable()
@@ -56,12 +78,11 @@ func main() {
 			selected := radioGroup.Selected
 			if selected == "All" {
 				broadcast(text)
-				logChannel <- fmt.Sprintf("[You > All]: " + text + "\n")
+				logChannel <- fmt.Sprintf("[You > All]: %s\n", text)
 			} else {
 				sendToPeer(selected, text)
 				logChannel <- fmt.Sprintf("[You > %s]: %s\n", selected, text)
 			}
-			logChannel <- fmt.Sprintf("[You]: " + text + "\n")
 			input.SetText("")
 		}
 	})
@@ -103,6 +124,8 @@ func listen(port string) {
 		return
 	}
 	logChannel <- fmt.Sprintf("Listening at %s\n", port)
+	ip := getOutboundIP().String()
+	myWindow.SetTitle(fmt.Sprintf("Nyx: listening at %s:%s", ip, port))
 
 	for {
 		conn, err := ln.Accept()
@@ -206,4 +229,14 @@ func sendToPeer(peer string, text string) {
 			}
 		}
 	}
+}
+
+func getOutboundIP() net.IP {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return net.IPv4(127, 0, 0, 1)
+	}
+	defer conn.Close()
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP
 }
